@@ -1,0 +1,94 @@
+{
+  "name": "@luoyi-dsh/discord-plugin",
+  "version": "1.0.0",
+  "description": "DeepSeek Harness (DSH) Discord 用戶帳號 (Selfbot) 助理與 MCP 插件：支援自然穿插閒聊、被提及與私訊智慧代回、傳送文字、圖片、文件與貼圖",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "discord",
+    "mcp",
+    "selfbot",
+    "duty"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "discord-mcp": "dist/mcp-server.js"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-settings-plugins"
+      ]
+    }
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./client": "./client.js",
+    "./mcp": {
+      "types": "./dist/mcp-server.d.ts",
+      "import": "./dist/mcp-server.js",
+      "default": "./dist/mcp-server.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "client.js",
+    "cordis.patch.yml",
+    "!**/data/**"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "start:mcp": "node dist/mcp-server.js",
+    "prepare": "npm run build"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.5",
+    "@modelcontextprotocol/sdk": "^1.6.0",
+    "discord.js-selfbot-v13": "^3.7.1",
+    "dotenv": "^16.4.7"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": "*",
+    "cordis": "*"
+  },
+  "peerDependenciesMeta": {
+    "cordis": {
+      "optional": true
+    },
+    "@deepseek-ai/schemastery": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  },
+  "author": {
+    "name": "Raxytw",
+    "url": "https://github.com/Raxytw"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Raxytw/dsh-discord-plugin.git"
+  },
+  "private": false
+}

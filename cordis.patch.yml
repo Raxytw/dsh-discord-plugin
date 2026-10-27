@@ -1,0 +1,15 @@
+# ============================================================================
+# dsh-discord-plugin —— DSH bundle patch（插件掛載宣告）
+# ============================================================================
+# 標準 DSH 插件掛載宣告：
+# 安裝後在 profile 的 `dsh.profile.bundles` 中列出此包名即可生效：
+#   dsh plugin --profile web add dsh-discord-plugin
+# 本地開發測試：
+#   dsh plugin --profile web add link:<本專案目錄>
+# ============================================================================
+
+- insert:
+    - id: discord-plugin
+      name: dsh-discord-plugin
+      config:
+        enabled: true
