@@ -105,8 +105,8 @@ ${contextLines}
 
   try {
     const response = await callLlmForDiscord(ctx, config, systemPrompt, userPrompt, log)
-    if (!response || response.trim() === '[NO_REPLY]') {
-      log(`[CoChat] AI 自行研判當前對話不宜插嘴，已放棄發言`)
+    if (!response || response.trim() === '[NO_REPLY]' || response.startsWith('[系統提示]')) {
+      log(`[CoChat] AI 自行研判當前對話不宜插嘴或未配置金鑰，已放棄發言`)
       return false
     }
 

@@ -10,6 +10,6 @@
 
 - insert:
     - id: discord-plugin
-      name: dsh-discord-plugin
+      name: '@luoyi-dsh/discord-plugin'
       config:
         enabled: true

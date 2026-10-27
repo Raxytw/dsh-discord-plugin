@@ -22,6 +22,7 @@ import { DiscordLedgerManager } from './lib/ledger.js'
 import { registerDiscordTools } from './tools/discordTools.js'
 import { handleIncomingMessageForReply } from './duty/mentionReply.js'
 import { handleIncomingMessageForCoChat } from './duty/autoChat.js'
+import { testLlmConnection, getAuthorizedSubscriptionProviders } from './lib/llm.js'
 
 export * from './types.js'
 export * from './config.js'
@@ -32,7 +33,7 @@ export * from './duty/mentionReply.js'
 export * from './duty/autoChat.js'
 
 export const name = 'discord-plugin'
-export const inject = ['webServer', 'tools']
+export const inject = ['webServer', 'tools', 'llm']
 
 // 載入 schemastery
 const zInstance = await loadSchemastery()
@@ -111,7 +112,12 @@ export function apply(ctx: any, userConfig: Partial<DiscordPluginConfig> = {}) {
   // 1. 初始化狀態帳本
   const ledger = new DiscordLedgerManager(join(dataDir, 'ledger.json'))
 
-  // 2. 初始化核心客戶端
+  // 2. 初始化核心客戶端 (先清理先前實例，避免 HMR 重複連線)
+  if (sharedClient) {
+    try {
+      sharedClient.logout().catch(() => {})
+    } catch {}
+  }
   const client = new DiscordClientWrapper(log)
   sharedClient = client
   ;(globalThis as any).__DSH_DISCORD_CLIENT__ = client
@@ -264,27 +270,56 @@ export function apply(ctx: any, userConfig: Partial<DiscordPluginConfig> = {}) {
         return sendJson(res, sendRes.ok ? 200 : 400, sendRes)
       }
 
+      // 取得 DSH 已授權之訂閱模型清單 (dsh-plugin-subscriptions)
+      if (req.method === 'GET' && pathname === '/api/discord/subscriptions') {
+        const providers = getAuthorizedSubscriptionProviders()
+        return sendJson(res, 200, { ok: true, providers })
+      }
+
+      // 測試 LLM 模型連線
+      if (req.method === 'POST' && pathname === '/api/discord/test-llm') {
+        const body = await readBody(req)
+        const testConfig = {
+          ...activeConfig,
+          llmMode: body.llmMode || activeConfig.llmMode || 'auto',
+          subscriptionProvider: body.subscriptionProvider || activeConfig.subscriptionProvider,
+          subscriptionModel: body.subscriptionModel || activeConfig.subscriptionModel,
+          customLlmApiKey: body.apiKey !== undefined ? body.apiKey : activeConfig.customLlmApiKey,
+          customLlmApiBase: body.apiBase || activeConfig.customLlmApiBase || 'https://api.deepseek.com',
+          customLlmModel: body.model || activeConfig.customLlmModel || 'deepseek-chat',
+        }
+
+        const testRes = await testLlmConnection(ctx, testConfig, log)
+        return sendJson(res, testRes.ok ? 200 : 400, testRes)
+      }
+
       sendJson(res, 404, { ok: false, error: `Not found: ${pathname}` })
     } catch (err: any) {
       sendJson(res, 500, { ok: false, error: err.message })
     }
   }
 
+  ;(globalThis as any).__DSH_DISCORD_REQUEST_HANDLER__ = handleRequest
+
   const webServer = (typeof ctx.get === 'function' ? ctx.get('webServer') : undefined) || ctx.webServer
-  if ((globalThis as any).__DSH_DISCORD_ROUTES_REGISTERED__) {
-    // 已經註冊過，防止重複載入導致 duplicate prefix route
-  } else if (webServer) {
+  if (!(globalThis as any).__DSH_DISCORD_ROUTES_REGISTERED__ && webServer) {
     try {
+      const dynamicDispatcher = (req: any, res: any) => {
+        const fn = (globalThis as any).__DSH_DISCORD_REQUEST_HANDLER__
+        if (typeof fn === 'function') return fn(req, res)
+        return handleRequest(req, res)
+      }
+
       if (typeof webServer.register === 'function') {
         webServer.register({
           kind: 'prefix',
           path: '/api/discord',
-          handler: handleRequest,
+          handler: dynamicDispatcher,
         })
         ;(globalThis as any).__DSH_DISCORD_ROUTES_REGISTERED__ = true
         log('✅ 已註冊 DSH 官方路由: /api/discord')
       } else if (webServer.router) {
-        webServer.router.all('/api/discord/*', handleRequest)
+        webServer.router.all('/api/discord/*', dynamicDispatcher)
         ;(globalThis as any).__DSH_DISCORD_ROUTES_REGISTERED__ = true
       }
     } catch (e: any) {

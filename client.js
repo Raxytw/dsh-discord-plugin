@@ -14,7 +14,7 @@
  */
 
 window.__ModuleLoader__.load({
-  id: 'dsh-discord-plugin',
+  id: '@luoyi-dsh/discord-plugin',
   factory: (require) => {
     const React = require('react')
     const h = React.createElement
@@ -396,32 +396,16 @@ window.__ModuleLoader__.load({
   border-bottom-color: #5865F2;
 }
 
-/* 自適應設定區塊 (Adaptive Settings Layout, §8.2) */
+/* 垂直堆疊設定區塊 (文字在上，選單/控制面板在下) */
 .dc-section-row {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 12px;
-  padding: 20px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 22px 0;
   border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(255, 255, 255, 0.06));
 }
 .dc-section-row:last-child {
   border-bottom: none;
-}
-
-@container dc-root (min-width: 840px) {
-  .dc-section-row {
-    grid-template-columns: 240px minmax(0, 1fr);
-    gap: 24px;
-    padding: 24px 0;
-  }
-}
-
-@media (min-width: 920px) {
-  .dc-section-row {
-    grid-template-columns: 240px minmax(0, 1fr);
-    gap: 24px;
-    padding: 24px 0;
-  }
 }
 
 .dc-section-info {
@@ -757,12 +741,64 @@ window.__ModuleLoader__.load({
       const [newBlacklistUser, setNewBlacklistUser] = useState('')
       const [newWhitelistUser, setNewWhitelistUser] = useState('')
 
+      // LLM 連線測試狀態
+      const [testingLlm, setTestingLlm] = useState(false)
+      const [llmTestResult, setLlmTestResult] = useState(null)
+      const [subscriptionProviders, setSubscriptionProviders] = useState([
+        {
+          provider: 'antigravity',
+          label: 'Google Antigravity (Gemini 2.5 Flash / Claude)',
+          defaultModel: 'gemini-2.5-flash',
+          models: ['gemini-2.5-flash', 'gemini-3-flash', 'gemini-2.5-pro', 'claude-sonnet-5-5-medium'],
+        },
+        {
+          provider: 'codex',
+          label: 'OpenAI Codex (ChatGPT Plus)',
+          defaultModel: 'gpt-5.6-terra',
+          models: ['gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-6-luna'],
+        },
+        {
+          provider: 'grok',
+          label: 'xAI Grok (X Premium)',
+          defaultModel: 'grok-4.5',
+          models: ['grok-4.5', 'grok-4.6', 'grok-4.7'],
+        },
+      ])
+
+      const handleTestLlm = async () => {
+        setTestingLlm(true)
+        setLlmTestResult(null)
+        try {
+          const res = await jpost('/test-llm', {
+            llmMode: config.llmMode || 'auto',
+            subscriptionProvider: config.subscriptionProvider || 'antigravity',
+            subscriptionModel: config.subscriptionModel || 'gemini-2.5-flash',
+            apiKey: config.customLlmApiKey,
+            apiBase: config.customLlmApiBase,
+            model: config.customLlmModel,
+          })
+          setLlmTestResult(res)
+        } catch (e) {
+          const is404 = e.message && e.message.includes('404')
+          const errorMsg = is404
+            ? '後端路由尚未載入 (HTTP 404)。因剛剛新增了平台訂閱與連線測試路由，請將執行 DSH 的終端機按 Ctrl+C 重啟（重新執行 dsh web）即可立即生效！'
+            : e.message
+          setLlmTestResult({ ok: false, error: errorMsg })
+        } finally {
+          setTestingLlm(false)
+        }
+      }
+
       const loadData = async () => {
         try {
-          const [cfgRes, statRes] = await Promise.all([
+          const [cfgRes, statRes, subRes] = await Promise.all([
             jget('/config'),
             jget('/status'),
+            jget('/subscriptions').catch(() => null),
           ])
+          if (subRes?.ok && subRes.providers?.length > 0) {
+            setSubscriptionProviders(subRes.providers)
+          }
           if (cfgRes?.ok) {
             setConfig(cfgRes.config)
             setIsDirty(false)
@@ -1816,71 +1852,298 @@ window.__ModuleLoader__.load({
             ),
 
             // 自訂 LLM 端點
+            // 模型與推理解析配置 (支援 DSH Subscriptions 平台訂閱與自訂 API)
             h(
               'div',
               { className: 'dc-section-row' },
               h(
                 'div',
                 { className: 'dc-section-info' },
-                h('div', { className: 'dc-section-title' }, '自訂推理 LLM 端點'),
-                h('div', { className: 'dc-section-desc' }, '選填。預設使用 DSH 宿主主模型；填寫後將直接使用自訂 API Key 與 Base URL 生成對話內容。')
+                h('div', { className: 'dc-section-title' }, '模型與推理解析配置 (LLM API)'),
+                h('div', { className: 'dc-section-desc' }, 'AI 自動代回與穿插聊天需要調用大型語言模型。可直接調用 DSH 已安裝之平台訂閱額度 (Subscriptions)，或填寫自訂 API 金鑰。'),
+                h('div', { style: { marginTop: '8px', fontSize: '11px', color: '#10b981', lineHeight: 1.4 } }, '🌟 支援平台訂閱免 Key 調用：若已安裝 dsh-plugin-subscriptions 並授權 Google、ChatGPT 或 Groq，即可免費直接調用，無需充值 DeepSeek！')
               ),
               h(
                 'div',
                 { className: 'dc-section-panel' },
+
+                // 1. 推理來源模式切換
                 h(
                   'div',
                   { className: 'dc-field' },
+                  h('label', { className: 'dc-field-label' }, '推理來源模式 (LLM Source Mode)'),
                   h(
                     'div',
-                    { className: 'dc-field-header' },
-                    h('label', { className: 'dc-field-label' }, 'API Key (選填)'),
-                    h(
-                      'button',
+                    { style: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' } },
+                    [
                       {
-                        style: { background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px' },
-                        onClick: () => setShowApiKey(!showApiKey),
+                        key: 'subscriptions',
+                        title: '🌟 平台訂閱額度',
+                        sub: '使用 DSH 已授權平台 (免 API Key)',
+                        badge: '推薦',
                       },
-                      showApiKey ? h(Icon.EyeOff) : h(Icon.Eye),
-                      showApiKey ? '隱藏' : '顯示'
-                    )
-                  ),
-                  h('input', {
-                    className: 'dc-input',
-                    type: showApiKey ? 'text' : 'password',
-                    placeholder: 'sk-xxxx...',
-                    value: config.customLlmApiKey || '',
-                    onChange: (e) => updateConfig('customLlmApiKey', e.target.value),
-                  })
-                ),
-
-                h(
-                  'div',
-                  { className: 'dc-grid-2' },
-                  h(
-                    'div',
-                    { className: 'dc-field' },
-                    h('label', { className: 'dc-field-label' }, 'API Base URL'),
-                    h('input', {
-                      className: 'dc-input',
-                      type: 'text',
-                      placeholder: 'https://api.deepseek.com',
-                      value: config.customLlmApiBase || 'https://api.deepseek.com',
-                      onChange: (e) => updateConfig('customLlmApiBase', e.target.value),
-                    })
-                  ),
-                  h(
-                    'div',
-                    { className: 'dc-field' },
-                    h('label', { className: 'dc-field-label' }, '模型名稱 (Model Name)'),
-                    h('input', {
-                      className: 'dc-input',
-                      type: 'text',
-                      placeholder: 'deepseek-chat',
-                      value: config.customLlmModel || 'deepseek-chat',
-                      onChange: (e) => updateConfig('customLlmModel', e.target.value),
+                      {
+                        key: 'auto',
+                        title: '⚡ 自動偵測',
+                        sub: '優先自訂，未填自動走訂閱',
+                      },
+                      {
+                        key: 'custom',
+                        title: '🔑 自訂 API 金鑰',
+                        sub: 'DeepSeek / OpenAI / Groq / 本地',
+                      },
+                    ].map((m) => {
+                      const active = (config.llmMode || 'auto') === m.key
+                      return h(
+                        'div',
+                        {
+                          key: m.key,
+                          onClick: () => updateConfig('llmMode', m.key),
+                          style: {
+                            padding: '10px 12px',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            border: active ? '1px solid #5865F2' : '1px solid rgba(255,255,255,0.08)',
+                            background: active ? 'rgba(88, 101, 242, 0.15)' : 'rgba(255,255,255,0.02)',
+                            transition: 'all 0.15s ease',
+                          },
+                        },
+                        h(
+                          'div',
+                          { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' } },
+                          h('div', { style: { fontSize: '13px', fontWeight: 600, color: active ? '#ffffff' : '#cbd5e1' } }, m.title),
+                          m.badge && h('span', { style: { fontSize: '10px', padding: '1px 5px', borderRadius: '4px', background: '#10b981', color: '#000', fontWeight: 700 } }, m.badge)
+                        ),
+                        h('div', { style: { fontSize: '11px', color: '#94a3b8', lineHeight: 1.3 } }, m.sub)
+                      )
                     })
                   )
+                ),
+
+                // 2. 平台訂閱設定面板 (當模式為 subscriptions 或 auto 時顯示)
+                ((config.llmMode || 'auto') === 'subscriptions' || (config.llmMode || 'auto') === 'auto') &&
+                  h(
+                    'div',
+                    {
+                      style: {
+                        padding: '12px 14px',
+                        borderRadius: '6px',
+                        background: 'rgba(16, 185, 129, 0.05)',
+                        border: '1px solid rgba(16, 185, 129, 0.2)',
+                        marginBottom: '12px',
+                      },
+                    },
+                    h(
+                      'div',
+                      { style: { fontSize: '12px', fontWeight: 600, color: '#10b981', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' } },
+                      h(Icon.Sparkles, { size: 14 }),
+                      'DSH 平台訂閱額度 (dsh-plugin-subscriptions)'
+                    ),
+                    h(
+                      'div',
+                      { className: 'dc-grid-2' },
+                      h(
+                        'div',
+                        { className: 'dc-field' },
+                        h('label', { className: 'dc-field-label' }, '選擇訂閱平台服務商'),
+                        h(
+                          'select',
+                          {
+                            className: 'dc-input',
+                            value: config.subscriptionProvider || 'antigravity',
+                            onChange: (e) => {
+                              const selP = e.target.value
+                              updateConfig('subscriptionProvider', selP)
+                              const found = subscriptionProviders.find((p) => p.provider === selP)
+                              if (found) {
+                                updateConfig('subscriptionModel', found.defaultModel)
+                              }
+                            },
+                          },
+                          subscriptionProviders.map((p) =>
+                            h('option', { key: p.provider, value: p.provider }, p.label)
+                          )
+                        )
+                      ),
+                      h(
+                        'div',
+                        { className: 'dc-field' },
+                        h('label', { className: 'dc-field-label' }, '模型名稱 (Model)'),
+                        h('input', {
+                          className: 'dc-input',
+                          type: 'text',
+                          placeholder: 'gemini-2.5-flash',
+                          value: config.subscriptionModel || 'gemini-2.5-flash',
+                          onChange: (e) => updateConfig('subscriptionModel', e.target.value),
+                        })
+                      )
+                    ),
+                    h(
+                      'div',
+                      { style: { display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '6px' } },
+                      (() => {
+                        const curP = config.subscriptionProvider || 'antigravity'
+                        const found = subscriptionProviders.find((p) => p.provider === curP)
+                        const models = found?.models || ['gemini-2.5-flash', 'gemini-3-flash', 'claude-sonnet-5-5-medium']
+                        return models.map((m) =>
+                          h(
+                            'button',
+                            {
+                              key: m,
+                              type: 'button',
+                              className: 'dc-btn',
+                              style: {
+                                fontSize: '11px',
+                                padding: '2px 8px',
+                                background: (config.subscriptionModel || 'gemini-2.5-flash') === m ? 'rgba(16,185,129,0.2)' : undefined,
+                                borderColor: (config.subscriptionModel || 'gemini-2.5-flash') === m ? '#10b981' : undefined,
+                              },
+                              onClick: () => updateConfig('subscriptionModel', m),
+                            },
+                            m
+                          )
+                        )
+                      })()
+                    )
+                  ),
+
+                // 3. 自訂 API 面板 (當模式為 custom 或 auto 時顯示)
+                ((config.llmMode || 'auto') === 'custom' || (config.llmMode || 'auto') === 'auto') &&
+                  h(
+                    'div',
+                    {
+                      style: {
+                        padding: (config.llmMode === 'custom') ? '0' : '12px 14px',
+                        borderRadius: '6px',
+                        background: (config.llmMode === 'custom') ? 'transparent' : 'rgba(255, 255, 255, 0.02)',
+                        border: (config.llmMode === 'custom') ? 'none' : '1px solid rgba(255, 255, 255, 0.08)',
+                        marginBottom: '12px',
+                      },
+                    },
+                    (config.llmMode || 'auto') === 'auto' &&
+                      h('div', { style: { fontSize: '12px', fontWeight: 600, color: '#cbd5e1', marginBottom: '8px' } }, '自訂 API 金鑰備援 (選填)'),
+
+                    // 常用服務商快速預設
+                    h(
+                      'div',
+                      { className: 'dc-field' },
+                      h('label', { className: 'dc-field-label' }, '常用自訂服務商快速填入 (Preset)'),
+                      h(
+                        'div',
+                        { style: { display: 'flex', flexWrap: 'wrap', gap: '6px' } },
+                        [
+                          { label: 'DeepSeek 官方', base: 'https://api.deepseek.com', model: 'deepseek-chat' },
+                          { label: 'OpenAI (GPT-4o-mini)', base: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+                          { label: 'Groq (高速免費額度)', base: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile' },
+                          { label: '矽基流動 SiliconFlow', base: 'https://api.siliconflow.cn/v1', model: 'deepseek-ai/DeepSeek-V3' },
+                          { label: '本地 Ollama (完全免費)', base: 'http://localhost:11434/v1', model: 'llama3' },
+                        ].map((p, idx) =>
+                          h(
+                            'button',
+                            {
+                              key: idx,
+                              type: 'button',
+                              className: 'dc-btn',
+                              style: { fontSize: '11px', padding: '4px 8px' },
+                              onClick: () => {
+                                updateConfig('customLlmApiBase', p.base)
+                                updateConfig('customLlmModel', p.model)
+                              },
+                            },
+                            p.label
+                          )
+                        )
+                      )
+                    ),
+
+                    h(
+                      'div',
+                      { className: 'dc-field' },
+                      h(
+                        'div',
+                        { className: 'dc-field-header' },
+                        h('label', { className: 'dc-field-label' }, 'API Key (自訂金鑰，本機 Ollama 或訂閱模式可留空)'),
+                        h(
+                          'button',
+                          {
+                            style: { background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px' },
+                            onClick: () => setShowApiKey(!showApiKey),
+                          },
+                          showApiKey ? h(Icon.EyeOff) : h(Icon.Eye),
+                          showApiKey ? '隱藏' : '顯示'
+                        )
+                      ),
+                      h('input', {
+                        className: 'dc-input',
+                        type: showApiKey ? 'text' : 'password',
+                        placeholder: 'sk-xxxx...',
+                        value: config.customLlmApiKey || '',
+                        onChange: (e) => updateConfig('customLlmApiKey', e.target.value),
+                      })
+                    ),
+
+                    h(
+                      'div',
+                      { className: 'dc-grid-2' },
+                      h(
+                        'div',
+                        { className: 'dc-field' },
+                        h('label', { className: 'dc-field-label' }, 'API Base URL'),
+                        h('input', {
+                          className: 'dc-input',
+                          type: 'text',
+                          placeholder: 'https://api.deepseek.com',
+                          value: config.customLlmApiBase || 'https://api.deepseek.com',
+                          onChange: (e) => updateConfig('customLlmApiBase', e.target.value),
+                        })
+                      ),
+                      h(
+                        'div',
+                        { className: 'dc-field' },
+                        h('label', { className: 'dc-field-label' }, '自訂模型名稱 (Model Name)'),
+                        h('input', {
+                          className: 'dc-input',
+                          type: 'text',
+                          placeholder: 'deepseek-chat',
+                          value: config.customLlmModel || 'deepseek-chat',
+                          onChange: (e) => updateConfig('customLlmModel', e.target.value),
+                        })
+                      )
+                    )
+                  ),
+
+                // 測試 LLM 連線按鈕與反饋
+                h(
+                  'div',
+                  { style: { marginTop: '12px', display: 'flex', alignItems: 'center', gap: '10px' } },
+                  h(
+                    'button',
+                    {
+                      className: 'dc-btn dc-btn-primary',
+                      disabled: testingLlm,
+                      onClick: handleTestLlm,
+                    },
+                    testingLlm ? h(Icon.Refresh, { size: 14, spinning: true }) : h(Icon.Sparkles, { size: 14 }),
+                    testingLlm ? '正在測試連線中...' : '測試 LLM 連線'
+                  ),
+                  llmTestResult &&
+                    h(
+                      'div',
+                      {
+                        style: {
+                          fontSize: '12px',
+                          padding: '6px 10px',
+                          borderRadius: '4px',
+                          background: llmTestResult.ok ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                          color: llmTestResult.ok ? '#10b981' : '#f87171',
+                          border: `1px solid ${llmTestResult.ok ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)'}`,
+                          flex: 1,
+                        },
+                      },
+                      llmTestResult.ok
+                        ? `✅ 連線成功！[${llmTestResult.providerUsed || '已連線'}] 模型回覆: "${llmTestResult.answer}"`
+                        : `❌ 連線失敗: ${llmTestResult.error}`
+                    )
                 )
               )
             )
@@ -2152,25 +2415,30 @@ window.__ModuleLoader__.load({
         }
 
         // 1. 左側一級專屬導航槽位 (settings.section)
-        try {
-          slots.inject('settings.section', () =>
+        const registerSection = () => {
+          try {
             slots.register(
               {
                 name: 'settings.section',
                 id: 'discord-plugin',
                 order: 33,
-                label: 'Discord',
+                label: 'Discord 帳號',
               },
               () => h(DiscordPanel)
             )
-          )
-        } catch (e) {
-          console.error('[dsh-discord-plugin] 註冊 settings.section 異常:', e)
+          } catch (e) {
+            console.error('[@luoyi-dsh/discord-plugin] 註冊 settings.section 異常:', e)
+          }
+        }
+        if (typeof slots.inject === 'function') {
+          slots.inject('settings.section', registerSection)
+        } else if (typeof slots.register === 'function') {
+          registerSection()
         }
 
         // 2. 外掛程式頁面頂部頁籤 (settings.plugins.tab)
-        try {
-          slots.inject('settings.plugins.tab', () =>
+        const registerTab = () => {
+          try {
             slots.register(
               {
                 name: 'settings.plugins.tab',
@@ -2180,14 +2448,19 @@ window.__ModuleLoader__.load({
               },
               () => h(DiscordPanel)
             )
-          )
-        } catch (e) {
-          console.error('[dsh-discord-plugin] 註冊 settings.plugins.tab 異常:', e)
+          } catch (e) {
+            console.error('[@luoyi-dsh/discord-plugin] 註冊 settings.plugins.tab 異常:', e)
+          }
+        }
+        if (typeof slots.inject === 'function') {
+          slots.inject('settings.plugins.tab', registerTab)
+        } else if (typeof slots.register === 'function') {
+          registerTab()
         }
 
         // 3. 外掛程式卡片列表槽位 (plugins.item)
-        try {
-          slots.inject('plugins.item', () =>
+        const registerItem = () => {
+          try {
             slots.register(
               {
                 name: 'plugins.item',
@@ -2197,9 +2470,14 @@ window.__ModuleLoader__.load({
               },
               () => h(DiscordPanel)
             )
-          )
-        } catch (e) {
-          console.error('[dsh-discord-plugin] 註冊 plugins.item 異常:', e)
+          } catch (e) {
+            console.error('[@luoyi-dsh/discord-plugin] 註冊 plugins.item 異常:', e)
+          }
+        }
+        if (typeof slots.inject === 'function') {
+          slots.inject('plugins.item', registerItem)
+        } else if (typeof slots.register === 'function') {
+          registerItem()
         }
       },
     }

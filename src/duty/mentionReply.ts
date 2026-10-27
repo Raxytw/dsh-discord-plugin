@@ -67,10 +67,11 @@ export async function handleIncomingMessageForReply(
     return false
   }
 
-  // 4. 去重檢查
+  // 4. 去重檢查與先行標記 (杜絕重複並發處理)
   if (ledger.hasSeenMessage(messageId)) {
     return false
   }
+  ledger.markSeenMessage(messageId, { channelId, userId: authorId, type: 'processing' })
 
   // 5. 黑白名單檢查
   if (config.blacklistUserIds && config.blacklistUserIds.includes(authorId)) {
@@ -125,6 +126,15 @@ ${contextText || '(無歷史紀錄)'}
     if (!answer || answer.trim() === '[NO_REPLY]') {
       ledger.markSeenMessage(messageId, { channelId, userId: authorId, type: 'no_reply' })
       return true
+    }
+
+    if (answer.startsWith('[系統提示]')) {
+      log(`[MentionReply] ⚠️ ${answer}`)
+      // 若為伺服器公屏，不發送系統設定提示至公頻避免尷尬；私訊時才提示本人
+      if (!isDm) {
+        ledger.markSeenMessage(messageId, { channelId, userId: authorId, type: 'system_notice_muted' })
+        return true
+      }
     }
 
     // 8. 擬真人打字延遲 (Jitter)

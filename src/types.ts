@@ -79,7 +79,10 @@ export interface DiscordPluginConfig {
   whitelistUserIds: string[]
   blacklistChannelIds: string[]
 
-  // 4. 自訂 LLM 配置（備援）
+  // 4. LLM 模型與推理額度配置
+  llmMode?: 'auto' | 'subscriptions' | 'custom'
+  subscriptionProvider?: string
+  subscriptionModel?: string
   customLlmApiKey?: string
   customLlmApiBase?: string
   customLlmModel?: string

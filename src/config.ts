@@ -41,7 +41,10 @@ export const defaultConfig: DiscordPluginConfig = {
   whitelistUserIds: [],
   blacklistChannelIds: [],
 
-  // 4. 自訂 LLM
+  // 4. LLM 模型與推理額度
+  llmMode: 'auto',
+  subscriptionProvider: 'antigravity',
+  subscriptionModel: 'gemini-2.5-flash',
   customLlmApiKey: '',
   customLlmApiBase: 'https://api.deepseek.com',
   customLlmModel: 'deepseek-chat',
@@ -121,6 +124,9 @@ export function sanitizeConfig(raw: any): DiscordPluginConfig {
     whitelistUserIds: cleanArr('whitelistUserIds', defaultConfig.whitelistUserIds),
     blacklistChannelIds: cleanArr('blacklistChannelIds', defaultConfig.blacklistChannelIds),
 
+    llmMode: (['auto', 'subscriptions', 'custom'].includes(cleanStr('llmMode')) ? cleanStr('llmMode') : defaultConfig.llmMode) as any,
+    subscriptionProvider: cleanStr('subscriptionProvider', defaultConfig.subscriptionProvider),
+    subscriptionModel: cleanStr('subscriptionModel', defaultConfig.subscriptionModel),
     customLlmApiKey: cleanStr('customLlmApiKey', defaultConfig.customLlmApiKey),
     customLlmApiBase: cleanStr('customLlmApiBase', defaultConfig.customLlmApiBase),
     customLlmModel: cleanStr('customLlmModel', defaultConfig.customLlmModel),
@@ -170,6 +176,13 @@ export function buildConfigSchema(zInstance: any) {
     whitelistUserIds: z.array(z.string()).default([]).description('白名單用戶 ID 清單 (非空時僅回覆白名單)').extra('volatile', true),
     blacklistChannelIds: z.array(z.string()).default([]).description('黑名單頻道 ID 清單').extra('volatile', true),
 
+    llmMode: z.union([
+      z.const('auto').description('自動偵測 (優先自訂金鑰，未填時使用訂閱額度)'),
+      z.const('subscriptions').description('DSH 平台訂閱額度 (Subscriptions - 免費免 Key)'),
+      z.const('custom').description('自訂 API 金鑰 (Custom API)'),
+    ]).default('auto').description('LLM 推理來源模式').extra('volatile', true),
+    subscriptionProvider: z.string().default('antigravity').description('訂閱平台服務商 (如 antigravity, codex, grok)').extra('volatile', true),
+    subscriptionModel: z.string().default('gemini-2.5-flash').description('訂閱平台模型名稱').extra('volatile', true),
     customLlmApiKey: z.string().role('secret').default('').description('自訂 LLM API Key (選填，未填時使用宿主 LLM)').extra('volatile', true),
     customLlmApiBase: z.string().default('https://api.deepseek.com').description('自訂 LLM Base URL').extra('volatile', true),
     customLlmModel: z.string().default('deepseek-chat').description('自訂 LLM 模型名稱').extra('volatile', true),
