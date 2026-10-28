@@ -33,7 +33,7 @@ export * from './duty/mentionReply.js'
 export * from './duty/autoChat.js'
 
 export const name = 'discord-plugin'
-export const inject = ['webServer', 'tools', 'llm']
+export const inject = ['webServer', 'tools']
 
 // 載入 schemastery
 const zInstance = await loadSchemastery()
