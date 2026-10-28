@@ -4,8 +4,9 @@
  * 職責：
  * 1. 即時監聽關注頻道之成員對話，維持上下文滾動緩衝區。
  * 2. 智慧評估插嘴時機：結合興趣關鍵字權重、提問探測、冷卻時間與隨機率判定。
- * 3. 呼叫大語言模型以極致自然隨性、具備真實人類口吻的風格穿插搭話或吐槽。
- * 4. 具備 [NO_REPLY] 自覺放棄機制與全自動擬真人類輸入（sendTyping）防封號延遲。
+ * 3. 【防 Prompt 注入】：過濾含有注入指令的頻道訊息並以 <untrusted_external_content> 封裝。
+ * 4. 【去 AI 味第一條件】：強制套用 ANTI_AI_FLAVOR_PRIMARY_RULE 與後處理清洗。
+ * 5. 【兼容 dsh-feiyu-mood 與 dsh-fish-memory 隔離記憶庫】：自然帶入心情指標與頻道互動記憶。
  * ============================================================================
  */
 
@@ -13,6 +14,16 @@ import { DiscordPluginConfig } from '../types.js'
 import { DiscordClientWrapper } from '../lib/discordClient.js'
 import { DiscordLedgerManager } from '../lib/ledger.js'
 import { callLlmForDiscord } from '../lib/llm.js'
+import {
+  ANTI_AI_FLAVOR_PRIMARY_RULE,
+  PROMPT_INJECTION_DEFENSE_RULE,
+  buildFeiyuMoodPromptBlock,
+  inspectAndSanitizeUntrustedInput,
+  recallSocialMemories,
+  recordSocialInteractionMemory,
+  stripAiFlavorArtifacts,
+  wrapUntrustedContent,
+} from '../lib/companion.js'
 
 export async function handleIncomingMessageForCoChat(
   ctx: any,
@@ -49,6 +60,12 @@ export async function handleIncomingMessageForCoChat(
     if (!config.monitoredGuildIds.includes(guildId)) return false
   }
 
+  // 2.5 防 Prompt 注入攔截
+  const injectionCheck = inspectAndSanitizeUntrustedInput(content)
+  if (injectionCheck.isInjection) {
+    return false
+  }
+
   // 3. 檢查頻道冷卻時間 (避免在同一個頻道連珠炮插話引人反感)
   if (!ledger.canChannelChat(channelId, config.coChatCooldownSeconds)) {
     return false
@@ -70,8 +87,8 @@ export async function handleIncomingMessageForCoChat(
 
   // 關鍵字興趣加權
   const lowerContent = content.toLowerCase()
-  const matchedKeyword = (config.interestKeywords || []).find((kw) =>
-    kw && lowerContent.includes(kw.toLowerCase())
+  const matchedKeyword = (config.interestKeywords || []).find(
+    (kw) => kw && lowerContent.includes(kw.toLowerCase())
   )
   if (matchedKeyword) {
     probability += 35
@@ -89,23 +106,38 @@ export async function handleIncomingMessageForCoChat(
 
   log(`[CoChat] 頻道 ${rawMsg.channel.name || channelId} 觸發穿插搭話判定 (機率: ${probability}%, 擲骰: ${roll.toFixed(1)}%)`)
 
-  // 7. 組裝上下文提示詞
+  // 7. 組裝上下文提示詞（整合去 AI 味第一條件、防注入、dsh-feiyu-mood 與 dsh-fish-memory 隔離庫）
   const contextLines = history
-    .map((m) => `[${m.author.username}]: ${m.content}`)
+    .map((m) => `[${m.author.username}]: ${inspectAndSanitizeUntrustedInput(m.content).sanitizedText}`)
     .join('\n')
 
-  const systemPrompt = config.coChatPersonaPrompt || '你是一個在 Discord 群裡隨意聊天的好友，說話簡潔幽默自然。'
+  const moodBlock = buildFeiyuMoodPromptBlock()
+  const chMemoryBlock = recallSocialMemories('dc', 'ch', channelId, injectionCheck.sanitizedText, 3)
+
+  const basePersona =
+    config.coChatPersonaPrompt || '你是一個在 Discord 群裡隨意聊天的好友，說話簡潔幽默自然。'
+  const systemPrompt = `${ANTI_AI_FLAVOR_PRIMARY_RULE}
+
+${PROMPT_INJECTION_DEFENSE_RULE}
+
+【角色人設】：
+${basePersona}
+${moodBlock ? `\n${moodBlock}` : ''}
+${chMemoryBlock ? `\n${chMemoryBlock}` : ''}`
+
   const userPrompt = `【群組近期對話紀錄】：
-${contextLines}
+${wrapUntrustedContent('channel_history', contextLines)}
 
-【最新發言】：[${rawMsg.author?.username}]: ${content}
+【最新發言】：
+${wrapUntrustedContent('latest_message', `[${rawMsg.author?.username}]: ${injectionCheck.sanitizedText}`)}
 
-請根據大家剛才的討論氛圍，以群友身分自然地穿插插嘴聊天（長話短說，20~50 字內，像真人打字，嚴禁任何 AI 客服語氣）。
+請嚴格遵守【第一條件：對話絕對不要 AI 味】，根據大家剛才的討論氛圍，以群友身分自然地穿插插嘴聊天（長話短說，15~45 字內，像真人打字，嚴禁任何 AI 客服語氣）。
 若你覺得這段對話太嚴肅、私密或完全不適合插話，請直接回覆 '[NO_REPLY]'：`
 
   try {
-    const response = await callLlmForDiscord(ctx, config, systemPrompt, userPrompt, log)
-    if (!response || response.trim() === '[NO_REPLY]' || response.startsWith('[系統提示]')) {
+    const rawResponse = await callLlmForDiscord(ctx, config, systemPrompt, userPrompt, log)
+    const response = stripAiFlavorArtifacts(rawResponse)
+    if (!response || response === '[NO_REPLY]' || response.startsWith('[系統提示]')) {
       log(`[CoChat] AI 自行研判當前對話不宜插嘴或未配置金鑰，已放棄發言`)
       return false
     }
@@ -127,7 +159,15 @@ ${contextLines}
       ledger.recordChannelChat(channelId)
       ledger.incrementDaily('coChats')
       ledger.markSeenMessage(rawMsg.id, { channelId, userId: authorId, type: 'co_chat' })
-      log(`[CoChat] ✅ 成功穿插聊天發言！`)
+      recordSocialInteractionMemory({
+        platform: 'dc',
+        channelType: 'ch',
+        targetUser: channelId,
+        userMessage: `@${rawMsg.author?.username || '群友'}: ${injectionCheck.sanitizedText}`,
+        botReply: response,
+        contextNote: `DC頻道(#${rawMsg.channel?.name || channelId})`,
+      })
+      log(`[CoChat] ✅ 成功穿插聊天發言並同步至隔離記憶庫！`)
       return true
     } else {
       log(`[CoChat] ❌ 發送失敗: ${res.error}`)

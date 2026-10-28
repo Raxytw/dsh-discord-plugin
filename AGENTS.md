@@ -138,3 +138,16 @@ if (client && client.isReady) {
 - **群組穿插搭話**：`coChatEnabled`、`coChatProbability`、`coChatCooldownSeconds`、`coChatMinHistoryMessages`、`interestKeywords`、`maxDailyCoChats`、`coChatPersonaPrompt`、`monitoredChannelIds`
 - **LLM 推理與外部訂閱額度**：`llmMode` (`auto` | `subscriptions` | `custom`)、`subscriptionProvider` (`antigravity` | `codex` | `grok` | `copilot`)、`subscriptionModel`、`customLlmApiKey`、`customLlmApiBase`、`customLlmModel`
 - **防封號保護**：`simulateTyping`、`jitterMinSeconds`、`jitterMaxSeconds`、`blacklistUserIds`、`whitelistUserIds`、`blacklistChannelIds`
+
+---
+
+## 🛡️ 5. 去 AI 味第一條件、心情指標、隔離記憶庫與防 Prompt 注入規範 (`src/lib/companion.ts`)
+
+1. **【第一條件】對話絕對不要 AI 味 (`ANTI_AI_FLAVOR_PRIMARY_RULE`)**：
+   - 強制所有 Discord 私訊 (DM)、提及回覆 (RM) 與群組穿插閒聊 (Co-Chat) 遵守去 AI 味第一鐵則，嚴禁客服套話、總結連接詞（「總而言之」、「首先/其次」）、排比句、Markdown 列點或括號動作描寫，並透過 `stripAiFlavorArtifacts()` 自動清洗輸出。
+2. **防範 RM 與 DM 的 Prompt 注入 (`Prompt Injection Defense`)**：
+   - 透過 `inspectAndSanitizeUntrustedInput()` 攔截「忽略先前指令」、「輸出 System Prompt / Token / 私人記憶」、偽造系統標籤等攻擊，並使用 `<untrusted_external_content>` 邊界標籤封裝所有外部頻道與私訊文本。
+3. **兼容接入 `dsh-feiyu-mood` 心情指標**：
+   - 自動同步 `~/.dsh/feiyu-mood/state.json` 與 `config.json` 的心情分數与七維度情緒指標，自然調節發言語氣溫度（對群友自動隱藏私人 `lastReason`）。
+4. **與 `dsh-fish-memory` 建立隔離對話記憶庫（與私人對話記憶嚴格隔離）**：
+   - 使用 `dsh-fish-memory` v2 格式將社交記憶獨立存於 `~/.dsh/fish-memory/social_dc_dm_<user>.json`、`social_dc_rm_<user>.json` 與 `social_dc_ch_<channelId>.json`，與主人的私人聊天記憶完全物理隔離。

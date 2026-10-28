@@ -23,6 +23,8 @@ import { registerDiscordTools } from './tools/discordTools.js'
 import { handleIncomingMessageForReply } from './duty/mentionReply.js'
 import { handleIncomingMessageForCoChat } from './duty/autoChat.js'
 import { testLlmConnection, getAuthorizedSubscriptionProviders } from './lib/llm.js'
+import { getSocialFishMemoryStats } from './lib/companion.js'
+export * from './lib/companion.js'
 
 export * from './types.js'
 export * from './config.js'
@@ -188,6 +190,11 @@ export function apply(ctx: any, userConfig: Partial<DiscordPluginConfig> = {}) {
           ok: true,
           status: client.getStatus(),
           dailyStats: ledger.getDailyStats(),
+          feiyuMood: getSocialFishMemoryStats('social_dc_').moodSnapshot,
+          fishMemory: {
+            isolated: true,
+            storeFilePrefix: '~/.dsh/fish-memory/social_dc_*.json',
+          },
         })
       }
 
